@@ -1,13 +1,15 @@
 -- Mod: Galvanic Augur
 -- Author: Wobin
--- Date: 30/06/2026
--- Version: 1.0.0
+-- Date: 26/07/2026
+-- Version: 1.1.1
 
 local mod = get_mod("Galvanic Augur")
-mod.version = "1.0.0"
+mod.version = "1.1.1"
 
 mod:io_dofile("Galvanic Augur/scripts/mods/Galvanic Augur/modules/Outlines")
 mod:io_dofile("Galvanic Augur/scripts/mods/Galvanic Augur/modules/Zone")
+
+local BreedSettings = require("scripts/settings/breed/breed_settings")
 
 local Unit = Unit
 local table = table
@@ -15,17 +17,38 @@ local Promise = Promise
 local Managers = Managers
 local delay = Promise.delay
 local ScriptUnit = ScriptUnit
+local Broadphase = Broadphase
 local vector3_distance = Vector3.distance
-local table_insert = table.insert
+local table_clear = table.clear
 local playerManager = Managers.player
 local unitWorldPosition = Unit.world_position
+local unit_is_valid = Unit.is_valid
 local managers_state = Managers.state
 local game_mode_manager = Managers.state.game_mode
 local has_extension = ScriptUnit.has_extension
+local broadphase_query = Broadphase.query
+local MINION_BREED_TYPE = BreedSettings.types.minion
 local HEALTH_ALIVE = HEALTH_ALIVE
 local CLASS = CLASS
 
+local TICK_INTERVAL = 0.3
+local OUTLINE_RADIUS = 30
+local BROADPHASE_MARGIN = 2
+
 mod.player = nil
+mod.cached_tier = 0
+
+local function live_player()
+	local player = mod.player
+	if not player then return nil end
+	if player.__deleted then
+		mod.player = nil
+		return nil
+	end
+	return player
+end
+
+mod.live_player = live_player
 
 mod.settings = {}
 
@@ -53,22 +76,63 @@ local function will_be_disarmed(unit)
 	return breed.ranged == true or breed.name == "renegade_netgunner"
 end
 
-mod.find_disarmable_enemies_in_radius = function(center, radius)
-	local state_extension = managers_state.extension
-	local side_system = state_extension and state_extension:system("side_system")
-	local player_side = side_system and side_system:get_side_from_name("heroes")
-	if not player_side then return {} end
-	local enemy_units_list = player_side:relation_units("enemy")
-	local enemy_units = {}
+local Unit_has_node = Unit.has_node
+local Unit_node = Unit.node
 
-	for _, unit in ipairs(enemy_units_list) do
-		if HEALTH_ALIVE and HEALTH_ALIVE[unit]
-			and vector3_distance(center, unitWorldPosition(unit, 1)) <= radius
-			and will_be_disarmed(unit) then
-			table_insert(enemy_units, unit)
+local function enemy_chest_position(unit)
+	if Unit_has_node(unit, "j_spine") then
+		return unitWorldPosition(unit, Unit_node(unit, "j_spine"))
+	end
+	return unitWorldPosition(unit, 1)
+end
+
+local function should_outline(unit, center, radius, player_unit, first_person_ext)
+	if not HEALTH_ALIVE[unit] then return false end
+	if not will_be_disarmed(unit) then return false end
+
+	local enemy_pos = enemy_chest_position(unit)
+	if vector3_distance(center, enemy_pos) > radius then return false end
+
+	if not first_person_ext or not first_person_ext:is_within_default_view(enemy_pos) then return false end
+
+	local perception_ext = has_extension(unit, "perception_system")
+	if not perception_ext then return false end
+	return perception_ext:immediate_line_of_sight_check(player_unit)
+end
+
+local broadphase_results = {}
+local disarmable_enemies = {}
+
+mod.find_disarmable_enemies_in_radius = function(center, radius, player_unit)
+	table_clear(disarmable_enemies)
+
+	if not player_unit or not unit_is_valid(player_unit) then return disarmable_enemies end
+
+	local state_extension = managers_state.extension
+	if not state_extension then return disarmable_enemies end
+
+	local side_system = state_extension:system("side_system")
+	local player_side = side_system and side_system:get_side_from_name("heroes")
+	if not player_side then return disarmable_enemies end
+
+	local broadphase_system = state_extension:system("broadphase_system")
+	local broadphase = broadphase_system and broadphase_system.broadphase
+	if not broadphase then return disarmable_enemies end
+
+	local first_person_ext = has_extension(player_unit, "first_person_system")
+	if not first_person_ext then return disarmable_enemies end
+
+	table_clear(broadphase_results)
+	local num_hits = broadphase_query(broadphase, center, radius + BROADPHASE_MARGIN, broadphase_results,
+		player_side:relation_side_names("enemy"), MINION_BREED_TYPE)
+
+	for i = 1, num_hits do
+		local unit = broadphase_results[i]
+		if should_outline(unit, center, radius, player_unit, first_person_ext) then
+			disarmable_enemies[unit] = true
 		end
 	end
-	return enemy_units
+	return disarmable_enemies
 end
 
 local retrieve_profile = function()
@@ -78,11 +142,13 @@ local retrieve_profile = function()
 	mod.player = (profile and profile.archetype and profile.archetype.name == "cryptic") and localplayer or nil
 end
 
-mod.current_tier = function()
-	local player = mod.player
-	if not player then return 0 end
-	local player_unit = player.player_unit
-	if not player_unit or not Unit.is_valid(player_unit) then return 0 end
+mod.current_tier = function(player_unit)
+	if not player_unit then
+		local player = live_player()
+		if not player then return 0 end
+		player_unit = player.player_unit
+	end
+	if not player_unit or not unit_is_valid(player_unit) then return 0 end
 	local ability_ext = has_extension(player_unit, "ability_system")
 	if not ability_ext then return 0 end
 	local ability = ability_ext:ability_is_equipped("combat_ability")
@@ -109,6 +175,17 @@ mod.on_all_mods_loaded = function()
 end
 
 mod.on_unload = function(exit_game)
+	mod.player = nil
+	mod.cached_tier = 0
+	mod.correct_area = false
+	if mod.remove_all_outlines then mod.remove_all_outlines() end
+	if mod.reset_outline_system then mod.reset_outline_system() end
+	if mod.remove_zone then mod.remove_zone() end
+	if mod.release_zone_package then mod.release_zone_package() end
+end
+
+mod.on_disabled = function(initial_call)
+	mod.cached_tier = 0
 	if mod.remove_all_outlines then mod.remove_all_outlines() end
 	if mod.remove_zone then mod.remove_zone() end
 end
@@ -125,57 +202,68 @@ mod.on_setting_changed = function(setting_id)
 end
 
 mod.on_game_state_changed = function(status, sub_state_name)
+	if status == "exit" then mod.on_unload() end
 	if sub_state_name == "GameplayStateRun" and status == "enter" then
 		mod:init()
 	end
-	if status == "exit" then mod.on_unload() end
 end
 
 mod.init = function()
 	game_mode_manager = Managers.state.game_mode
-	if game_mode_manager then
-		if acceptable_locations[game_mode_manager:game_mode_name()] then
-			mod.correct_area = true
-			delay(3):next(retrieve_profile):next(mod.init_zone)
-		else
-			mod.correct_area = false
-			mod.on_unload()
-		end
+	if not game_mode_manager then return end
+
+	if not acceptable_locations[game_mode_manager:game_mode_name()] then
+		mod.on_unload()
+		return
 	end
+
+	mod.correct_area = true
+	delay(3):next(function()
+		if not mod.correct_area then return end
+		retrieve_profile()
+		if mod.player then mod.init_zone() end
+	end)
 end
 
 mod:hook_safe(CLASS.InventoryBackgroundView, "on_exit", function()
-	delay(3):next(retrieve_profile)
+	delay(3):next(function()
+		if not mod.correct_area then return end
+		retrieve_profile()
+		if mod.player then mod.init_zone() end
+	end)
 end)
 
 local delta = 0
 
 mod.update = function(dt)
-	if not mod.correct_area then return end
+	if not mod.correct_area or not mod:is_enabled() then return end
 	delta = delta + dt
-	if delta < 0.3 then return end
+	if delta < TICK_INTERVAL then return end
 	delta = 0
 
-	if not mod.player then
+	local player = live_player()
+	if not player then
+		mod.cached_tier = 0
 		if mod.zoned_tier then mod.remove_zone() end
 		mod.remove_all_outlines()
 		return
 	end
 
-	local tier = mod.current_tier()
+	local player_unit = player.player_unit
+	local tier = mod.current_tier(player_unit)
+	mod.cached_tier = tier
 
 	if mod.settings.show_rings and tier > 0 then
-		if mod.zoned_tier ~= tier then
-			mod.manage_zone(tier)
+		if mod.zoned_tier ~= tier or mod.zoned_unit ~= player_unit then
+			mod.manage_zone(tier, player_unit)
 		end
 	elseif mod.zoned_tier then
 		mod.remove_zone()
 	end
 
 	if mod.settings.show_outline and tier >= 2 then
-		local center = Unit.world_position(mod.player.player_unit, 1)
-		local enemies = mod.find_disarmable_enemies_in_radius(center, 30)
-		mod.manage_outlines(enemies)
+		local center = unitWorldPosition(player_unit, 1)
+		mod.manage_outlines(mod.find_disarmable_enemies_in_radius(center, OUTLINE_RADIUS, player_unit))
 	else
 		mod.remove_all_outlines()
 	end

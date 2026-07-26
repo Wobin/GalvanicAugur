@@ -2,30 +2,41 @@ local mod = get_mod("Galvanic Augur")
 local decal_path = "content/levels/training_grounds/fx/decal_aoe_indicator"
 local package_path = "content/levels/training_grounds/missions/mission_tg_basic_combat_01"
 
-local Managers = Managers
-local package = Managers.package
 local Unit = Unit
 local World = World
 local Vector3 = Vector3
 local Quaternion = Quaternion
 local is_valid = Unit.is_valid
 
-mod.init_zone = function(has_loaded)
-	if not package:has_loaded(package_path) and not has_loaded then
-		package:load(package_path, "Galvanic Augur", function()
-			mod.init_zone(true)
-		end)
+mod.zone_loaded = false
+
+mod.init_zone = function()
+	if mod.zone_loaded then return end
+
+	local status = mod:package_status(package_path)
+	if status == "loaded" then
+		mod.zone_loaded = true
 		return
 	end
-	mod.zone_loaded = true
+	if status then return end
+
+	mod:load_package(package_path, function()
+		mod.zone_loaded = true
+	end)
+end
+
+mod.release_zone_package = function()
+	mod.zone_loaded = false
+	if mod:package_status(package_path) then
+		mod:unload_package(package_path)
+	end
 end
 
 local TIER_RADIUS = { [1] = 12, [2] = 30 }
 
-mod.manage_zone = function(tier)
-	if not mod.player or not mod.zone_loaded then return end
-	local player_unit = mod.player.player_unit
-	if not is_valid(player_unit) then return end
+mod.manage_zone = function(tier, player_unit)
+	if not mod.zone_loaded then return end
+	if not player_unit or not is_valid(player_unit) then return end
 
 	mod.remove_zone()
 
@@ -53,12 +64,16 @@ mod.manage_zone = function(tier)
 
 	mod.decal = decal_unit
 	mod.zoned_tier = tier
+	mod.zoned_unit = player_unit
 end
 
 mod.remove_zone = function()
-	if mod.decal and is_valid(mod.decal) then
-		World.destroy_unit(Unit.world(mod.decal), mod.decal)
-		mod.decal = nil
-	end
+	local decal = mod.decal
+	mod.decal = nil
 	mod.zoned_tier = nil
+	mod.zoned_unit = nil
+
+	if decal and is_valid(decal) then
+		World.destroy_unit(Unit.world(decal), decal)
+	end
 end
