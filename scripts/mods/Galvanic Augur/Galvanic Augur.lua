@@ -1,10 +1,23 @@
 -- Mod: Galvanic Augur
 -- Author: Wobin
--- Date: 26/07/2026
--- Version: 1.1.1
+-- Date: 20/08/2026
 
 local mod = get_mod("Galvanic Augur")
-mod.version = "1.1.1"
+
+mod.colour_channel = function(id, index, default)
+	local c = mod:get(id)
+
+	if type(c) == "table" and #c >= 4 then
+		return c[index + 1]
+	end
+
+	local suffix = (index == 1 and "_R") or (index == 2 and "_G") or "_B"
+	local v = mod:get(id .. suffix)
+
+	return type(v) == "number" and v or default
+end
+
+mod.version = mod.get_metadata and mod:get_metadata("version") or "unknown"
 
 mod:io_dofile("Galvanic Augur/scripts/mods/Galvanic Augur/modules/Outlines")
 mod:io_dofile("Galvanic Augur/scripts/mods/Galvanic Augur/modules/Zone")
@@ -57,15 +70,15 @@ mod.refresh_settings = function()
 	s.show_rings = mod:get("show_rings")
 	s.show_outline = mod:get("show_outline")
 	s.ring_transparency = mod:get("ring_transparency") or 50
-	s.ring1_colour_R = mod:get("ring1_colour_R") or 160
-	s.ring1_colour_G = mod:get("ring1_colour_G") or 32
-	s.ring1_colour_B = mod:get("ring1_colour_B") or 240
-	s.ring2_colour_R = mod:get("ring2_colour_R") or 0
-	s.ring2_colour_G = mod:get("ring2_colour_G") or 80
-	s.ring2_colour_B = mod:get("ring2_colour_B") or 255
-	s.outline_colour_R = mod:get("outline_colour_R") or 0
-	s.outline_colour_G = mod:get("outline_colour_G") or 80
-	s.outline_colour_B = mod:get("outline_colour_B") or 255
+	s.ring1_colour_R = mod.colour_channel("ring1_colour", 1, 160)
+	s.ring1_colour_G = mod.colour_channel("ring1_colour", 2, 32)
+	s.ring1_colour_B = mod.colour_channel("ring1_colour", 3, 240)
+	s.ring2_colour_R = mod.colour_channel("ring2_colour", 1, 0)
+	s.ring2_colour_G = mod.colour_channel("ring2_colour", 2, 80)
+	s.ring2_colour_B = mod.colour_channel("ring2_colour", 3, 255)
+	s.outline_colour_R = mod.colour_channel("outline_colour", 1, 0)
+	s.outline_colour_G = mod.colour_channel("outline_colour", 2, 80)
+	s.outline_colour_B = mod.colour_channel("outline_colour", 3, 255)
 end
 
 local function will_be_disarmed(unit)
@@ -267,4 +280,12 @@ mod.update = function(dt)
 	else
 		mod.remove_all_outlines()
 	end
+end
+
+
+mod.on_settings_reset = function()
+	mod.refresh_settings()
+	if mod.refresh_outline_colour then mod.refresh_outline_colour() end
+	if mod.remove_all_outlines then mod.remove_all_outlines() end
+	if mod.remove_zone then mod.remove_zone() end
 end

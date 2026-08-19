@@ -1,4 +1,23 @@
 local mod = get_mod("Galvanic Augur")
+local function migrate_colour(id)
+	if mod:get(id) ~= nil then
+		return
+	end
+
+	local r = mod:get(id .. "_R")
+	local g = mod:get(id .. "_G")
+	local b = mod:get(id .. "_B")
+
+	if type(r) == "number" and type(g) == "number" and type(b) == "number" then
+		mod:set(id, { 255, r, g, b })
+	end
+end
+
+migrate_colour("ring1_colour")
+migrate_colour("ring2_colour")
+migrate_colour("outline_colour")
+
+
 
 return {
 	name = mod:localize("mod_name"),
@@ -19,21 +38,15 @@ return {
 			},
 			{
 				setting_id = "ring1_colour",
-				type = "group",
-				sub_widgets = {
-					{ setting_id = "ring1_colour_R", type = "numeric", default_value = 160, range = {0, 255} },
-					{ setting_id = "ring1_colour_G", type = "numeric", default_value = 32,  range = {0, 255} },
-					{ setting_id = "ring1_colour_B", type = "numeric", default_value = 240, range = {0, 255} },
-				},
+				type = "color",
+				default_value = { 255, 160, 32, 240 },
+				has_alpha = false,
 			},
 			{
 				setting_id = "ring2_colour",
-				type = "group",
-				sub_widgets = {
-					{ setting_id = "ring2_colour_R", type = "numeric", default_value = 0,   range = {0, 255} },
-					{ setting_id = "ring2_colour_G", type = "numeric", default_value = 80,  range = {0, 255} },
-					{ setting_id = "ring2_colour_B", type = "numeric", default_value = 255, range = {0, 255} },
-				},
+				type = "color",
+				default_value = { 255, 0, 80, 255 },
+				has_alpha = false,
 			},
 			{
 				setting_id = "show_outline",
@@ -42,12 +55,9 @@ return {
 			},
 			{
 				setting_id = "outline_colour",
-				type = "group",
-				sub_widgets = {
-					{ setting_id = "outline_colour_R", type = "numeric", default_value = 0,   range = {0, 255} },
-					{ setting_id = "outline_colour_G", type = "numeric", default_value = 80,  range = {0, 255} },
-					{ setting_id = "outline_colour_B", type = "numeric", default_value = 255, range = {0, 255} },
-				},
+				type = "color",
+				default_value = { 255, 0, 80, 255 },
+				has_alpha = false,
 			},
 		},
 	},
