@@ -1,8 +1,17 @@
 {
 	"name": "Galvanic Augur",
+	"description": "Draws a charge-sized range ring under the player for the Skitarii Voltaic Emitter, and outlines nearby ranged enemies at full effect.",
+	"version": "1.2.0",
+	"author": "Wobin",
+	"homepage": "https://www.nexusmods.com/warhammer40kdarktide/mods/986",
+	"source": "https://github.com/Wobin/GalvanicAugur",
+	"funding": {
+		"kofi": "https://ko-fi.com/wobin_dwonderdog"
+	},
+	"nexusId": "986",
 	"order": {
-		"require": ["dmf"],
-		"this_after": ["dmf"],
+		"require": [],
+		"this_after": [],
 		"this_before": []
 	}
 }
